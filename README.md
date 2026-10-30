@@ -46,9 +46,9 @@ These are hard rules, not defaults.
 - **Every AI-derived field is attributed to its source** and marked unverified
   until an officer confirms it.
 
-## Out of scope (permanent)
+## Out of scope
 
-The following are out of scope and will not be built:
+The following are out of scope and will not be built for now:
 
 - an AI score of someone's kindness, values, or whether they'd be "beneficial to
   the United States"
