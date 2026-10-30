@@ -1,0 +1,17 @@
+# Test fixture only. The citations below are placeholders for a reviewed file's
+# shape; they are not legal references and must never be copied into a real
+# criteria file.
+benefit_type: TEST_BENEFIT
+reviewed_by: Test Fixture (not a real reviewer)
+reviewed_on: 2026-10-30
+elements:
+  - element_id: date_of_entry
+    description: Date the applicant last entered the United States.
+    evidence_hint: Passport entry stamp or I-94.
+    citation: TEST-PLACEHOLDER-NOT-A-CITATION
+    source_url: https://example.invalid/test-fixture
+  - element_id: filing_date
+    description: Date the application was filed.
+    evidence_hint: Receipt notice.
+    citation: TEST-PLACEHOLDER-NOT-A-CITATION
+    source_url: https://example.invalid/test-fixture

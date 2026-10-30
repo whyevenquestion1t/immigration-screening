@@ -1,0 +1,44 @@
+# TEMPLATE — intentionally incomplete. load_criteria() rejects this file.
+# Fill in citation/source_url per element and the reviewer attestation below,
+# from the statute and regulations themselves. Do not generate these values.
+
+benefit_type: EXAMPLE_BENEFIT_TYPE
+
+reviewed_by:   # name and role of the person who verified every citation below
+reviewed_on:   # YYYY-MM-DD
+
+elements:
+  - element_id: date_of_entry
+    description: Date the applicant last entered the United States, as stated in the record.
+    evidence_hint: Passport entry stamp, I-94, or border encounter record.
+    citation:
+    source_url:
+
+  - element_id: filing_date
+    description: Date the application was filed, as stated on the receipt notice.
+    evidence_hint: Receipt notice.
+    citation:
+    source_url:
+
+  - element_id: continuous_presence_duration
+    description: Period of continuous presence in the United States stated in the record.
+    evidence_hint: Leases, employment records, school records, tax filings.
+    citation:
+    source_url:
+
+  - element_id: tax_filing_compliance
+    description: >
+      Tax years for which the record contains a filed return or transcript.
+      Record only what the submitted documents show; absence of a document is
+      not evidence of non-filing.
+    evidence_hint: IRS transcripts, filed returns.
+    citation:
+    source_url:
+
+  - element_id: derivative_family_members
+    description: >
+      Family members listed as derivatives on this application, as named on the
+      form itself.
+    evidence_hint: The application form's derivative section.
+    citation:
+    source_url:

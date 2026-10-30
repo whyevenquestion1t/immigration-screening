@@ -66,9 +66,67 @@ grounds, and litigation plus re-adjudication costs DHS far more than the officer
 hours it saves. Medical condition and associates' data are what turn a bad tool
 into an unlawful one.
 
+## How provenance works
+
+Every fact the software reports is a `Sourced` value carrying the document,
+page, and verbatim quote it came from, plus a `verified` flag. The model is
+asked for one factual element at a time and required to return the quote it
+read the value from; the code then checks that quote against that page of that
+document. A quote that does not appear there collapses to `UNKNOWN`, and the
+officer is told the element is unaddressed rather than shown a value the record
+never stated.
+
+This is deliberately stricter than trusting the model's own citations. The
+API's document-citation feature cannot be combined with structured JSON output
+(the pairing returns a 400), and the local check is the better of the two
+anyway: a fabricated quote fails a deterministic string comparison. `UNKNOWN`
+is a distinct value from "absent" and from a default, and it is never filled
+in.
+
+The exclusions in *Out of scope* are partly machine-checked. `guardrails.py`
+rejects excluded inputs (medical, associates) and conclusion-shaped outputs
+(score, verdict, eligibility) anywhere in a record, schema, or criteria file,
+and the test suite fails if that boundary is crossed.
+
+## Repository layout
+
+    src/casesupport/
+      provenance.py   Sourced values, UNKNOWN, quote verification
+      guardrails.py   enforced exclusions (inputs and output surface)
+      models.py       Document, CaseFile, DerivativeFamilyMember
+      criteria.py     loads human-reviewed criteria files; refuses unreviewed
+      extraction.py   Claude-backed element reading, then local verification
+      intake.py       multilingual field explanation and answer translation
+      organizer.py    the officer's evidence worksheet
+    criteria/         criteria file template (rejected by design until reviewed)
+    examples/         runnable end-to-end demo, no API key needed
+    tests/
+
+## Running it
+
+    python3.13 -m venv .venv
+    .venv/bin/pip install -e ".[dev]"
+    .venv/bin/python -m pytest              # 36 tests, no network
+    .venv/bin/python examples/demo_worksheet.py
+
+The demo uses a scripted fake client, so the whole path is inspectable offline.
+One of its two model readings cites a quote that is not in the document; the
+output shows that reading being discarded. Live extraction needs
+`ANTHROPIC_API_KEY` or an `ant auth login` profile.
+
+Model: `claude-opus-5`, with adaptive thinking. Extraction checks for a
+`refusal` stop reason and treats it as `UNKNOWN` rather than crashing.
+
 ## Status
 
-Pre-implementation. This repository establishes scope; no application code yet.
+Pre-implementation on the officer-facing API and the interview component.
+Implemented: provenance and verification, guardrails, criteria loading,
+single-element extraction, intake translation, and worksheet rendering.
+
+Not built yet: the HTTP surface, document ingest from PDF (`Document` is
+currently constructed from already-extracted page text), interview
+transcription, and persistence. No criteria file for a real benefit type exists
+and none should be written without a human verifying every citation.
 
 ## License
 
