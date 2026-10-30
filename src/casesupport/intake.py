@@ -26,6 +26,16 @@ from pydantic import BaseModel, Field
 
 MODEL = "claude-opus-5"
 
+
+class IntakeUnavailable(RuntimeError):
+    """The model declined or returned nothing usable.
+
+    Unlike extraction, there is no UNKNOWN to fall back to: a half-translated
+    answer must not reach a filing, and a field the applicant cannot get
+    explained needs a human interpreter, not a blank. Callers surface this to
+    staff rather than swallowing it.
+    """
+
 EXPLAIN_SYSTEM = """\
 You explain what a government form field is asking, for someone filling in
 their own application in a language they are more comfortable in.
@@ -82,6 +92,18 @@ class IntakeAnswer:
     translator_notes: str = ""
 
 
+def _check_usable(response: object, what: str) -> None:
+    """Refusals arrive as HTTP 200 with stop_reason "refusal" and no content."""
+    if getattr(response, "stop_reason", None) == "refusal":
+        details = getattr(response, "stop_details", None)
+        raise IntakeUnavailable(
+            f"the model declined while {what} "
+            f"(category: {getattr(details, 'category', None)}). Route to a human."
+        )
+    if getattr(response, "parsed_output", None) is None:
+        raise IntakeUnavailable(f"no usable response while {what}. Route to a human.")
+
+
 def explain_field(
     field_label: str,
     field_help: str,
@@ -107,6 +129,7 @@ def explain_field(
         ],
         output_format=FieldExplanation,
     )
+    _check_usable(response, f"explaining field {field_label!r} in {target_language}")
     return response.parsed_output
 
 
@@ -136,6 +159,7 @@ def render_answer(
         ],
         output_format=TranslatedAnswer,
     )
+    _check_usable(response, f"translating field {field_id!r} from {source_language}")
     parsed = response.parsed_output
     return IntakeAnswer(
         field_id=field_id,

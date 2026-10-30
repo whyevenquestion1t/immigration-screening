@@ -104,9 +104,9 @@ and the test suite fails if that boundary is crossed.
 
 ## Running it
 
-    python3.13 -m venv .venv
+    python3 -m venv .venv          # Python 3.11 or newer
     .venv/bin/pip install -e ".[dev]"
-    .venv/bin/python -m pytest              # 36 tests, no network
+    .venv/bin/python -m pytest     # no network, no API key
     .venv/bin/python examples/demo_worksheet.py
 
 The demo uses a scripted fake client, so the whole path is inspectable offline.
@@ -123,10 +123,31 @@ Pre-implementation on the officer-facing API and the interview component.
 Implemented: provenance and verification, guardrails, criteria loading,
 single-element extraction, intake translation, and worksheet rendering.
 
-Not built yet: the HTTP surface, document ingest from PDF (`Document` is
-currently constructed from already-extracted page text), interview
-transcription, and persistence. No criteria file for a real benefit type exists
-and none should be written without a human verifying every citation.
+Not built yet:
+
+- **Interview support** — not started. Of the three components, only the record
+  organizer and intake assistant have code.
+- The HTTP surface and persistence.
+- Document ingest from PDF. `Document` is currently constructed from
+  already-extracted page text.
+- No criteria file for a real benefit type exists, and none should be written
+  without a human verifying every citation.
+
+Known limitations in what *is* built, both of which affect what an officer
+sees and are the next things to fix:
+
+- **Conflicting evidence is not surfaced.** `extract_elements` keeps the first
+  verified reading per element. If two documents state different values for the
+  same element, only one reaches the worksheet and the officer never sees the
+  discrepancy — which is exactly the signal an adjudicator needs. `facts` needs
+  to become multi-valued per element; `ElementRow.facts` is already a tuple in
+  anticipation.
+- **A failed verification is logged, not displayed.** When extraction proposes
+  a value whose quote does not check out, the element shows as NOT ADDRESSED.
+  The officer cannot currently distinguish "nothing in the record addresses
+  this" from "a value was proposed and rejected", which are different
+  situations. `organizer.ElementRow.unverified_note` renders this correctly but
+  nothing in the live pipeline populates it.
 
 ## License
 
