@@ -69,3 +69,8 @@ into an unlawful one.
 ## Status
 
 Pre-implementation. This repository establishes scope; no application code yet.
+
+## License
+
+[0BSD](LICENSE) — use, copy, modify, and distribute for any purpose, with no
+conditions and no attribution requirement.
