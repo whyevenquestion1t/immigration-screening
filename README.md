@@ -83,6 +83,16 @@ anyway: a fabricated quote fails a deterministic string comparison. `UNKNOWN`
 is a distinct value from "absent" and from a default, and it is never filled
 in.
 
+Readings are never reduced to a single answer. Every element is read from
+every document and all verified readings are kept, so when two documents state
+different values the worksheet flags **CONFLICT** and shows both with their own
+citations rather than picking one — a discrepancy across the record is the
+officer's to resolve, and silently choosing would be the software making the
+call. Readings that fail verification are retained too, and disclosed as "a
+reading was discarded" with the document named but the value withheld, so that
+"nothing in the record addresses this" and "a value was proposed and rejected"
+do not look alike.
+
 The exclusions in *Out of scope* are partly machine-checked. `guardrails.py`
 rejects excluded inputs (medical, associates) and conclusion-shaped outputs
 (score, verdict, eligibility) anywhere in a record, schema, or criteria file,
@@ -133,21 +143,15 @@ Not built yet:
 - No criteria file for a real benefit type exists, and none should be written
   without a human verifying every citation.
 
-Known limitations in what *is* built, both of which affect what an officer
-sees and are the next things to fix:
+Known limitations in what *is* built:
 
-- **Conflicting evidence is not surfaced.** `extract_elements` keeps the first
-  verified reading per element. If two documents state different values for the
-  same element, only one reaches the worksheet and the officer never sees the
-  discrepancy — which is exactly the signal an adjudicator needs. `facts` needs
-  to become multi-valued per element; `ElementRow.facts` is already a tuple in
-  anticipation.
-- **A failed verification is logged, not displayed.** When extraction proposes
-  a value whose quote does not check out, the element shows as NOT ADDRESSED.
-  The officer cannot currently distinguish "nothing in the record addresses
-  this" from "a value was proposed and rejected", which are different
-  situations. `organizer.ElementRow.unverified_note` renders this correctly but
-  nothing in the live pipeline populates it.
+- Quote verification is exact-match after normalization (Unicode, whitespace,
+  dashes, quotes, soft hyphens). A correct reading that paraphrases its quote
+  is rejected — the safe direction to fail, but it will reject some good
+  extractions, so the discard disclosure on the worksheet matters.
+- Elements are read one at a time per document, so cost scales with
+  elements × documents. Fine at current scope; batching is the lever if it
+  becomes a problem.
 
 ## License
 

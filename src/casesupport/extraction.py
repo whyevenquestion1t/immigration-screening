@@ -15,6 +15,7 @@ fails a fabricated quote deterministically.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import anthropic
@@ -22,8 +23,8 @@ from pydantic import BaseModel, Field
 
 from casesupport.criteria import Element
 from casesupport.guardrails import check_inputs
-from casesupport.models import Document
-from casesupport.provenance import UNKNOWN, Sourced, Unknown
+from casesupport.models import Document, ElementFindings
+from casesupport.provenance import Sourced, Unknown
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,21 @@ Rules:
 """
 
 
+@dataclass(frozen=True)
+class ExtractionResult:
+    """One attempt to read one element from one document.
+
+    Both outcomes are kept. `verified` is a fact; `rejected` is a reading whose
+    quote did not appear in the cited source, retained only so the worksheet
+    can say that an attempt was made and discarded. `refused` records that the
+    model declined, which is different from the document being silent.
+    """
+
+    verified: Sourced[str] | None = None
+    rejected: Sourced[str] | None = None
+    refused: bool = False
+
+
 class ElementReading(BaseModel):
     """What the model returns for one element. Provenance is mandatory."""
 
@@ -64,8 +80,8 @@ def extract_element(
     document: Document,
     *,
     client: anthropic.Anthropic | None = None,
-) -> Sourced[str] | Unknown:
-    """Read one element from one document, or return UNKNOWN.
+) -> ExtractionResult:
+    """Read one element from one document.
 
     `client` is injectable so tests and offline runs never reach the network.
     """
@@ -99,11 +115,11 @@ def extract_element(
             element.element_id,
             getattr(details, "category", None),
         )
-        return UNKNOWN
+        return ExtractionResult(refused=True)
 
     reading = response.parsed_output
     if reading is None or not reading.found:
-        return UNKNOWN
+        return ExtractionResult()
 
     check_inputs(reading.model_dump())
 
@@ -125,7 +141,7 @@ def extract_element(
             logger.warning(
                 "%s cited page %s, which does not exist", document.document_id, reading.page
             )
-            return UNKNOWN
+            return ExtractionResult(rejected=candidate)
     else:
         scope = document.text
 
@@ -136,7 +152,8 @@ def extract_element(
             document.document_id,
             element.element_id,
         )
-    return result
+        return ExtractionResult(rejected=candidate)
+    return ExtractionResult(verified=result)
 
 
 def extract_elements(
@@ -144,19 +161,29 @@ def extract_elements(
     documents: list[Document],
     *,
     client: anthropic.Anthropic | None = None,
-) -> dict[str, Sourced[Any] | Unknown]:
-    """Read every element across every document; first verified hit wins.
+) -> dict[str, ElementFindings]:
+    """Read every element from every document, keeping every reading.
 
-    Elements no document answers are recorded as UNKNOWN rather than omitted,
-    so the worksheet can show the officer what is missing.
+    Deliberately not first-hit-wins: each document is read even once another
+    has answered the element, because two documents stating different values is
+    a discrepancy the officer needs to see. Reducing that to one answer here
+    would be the software making the call.
+
+    Elements no document answers are recorded as empty findings rather than
+    omitted, so the worksheet can show what is missing.
     """
     client = client or anthropic.Anthropic()
-    facts: dict[str, Sourced[Any] | Unknown] = {}
+    facts: dict[str, ElementFindings] = {}
     for element in elements:
-        facts[element.element_id] = UNKNOWN
+        verified: list[Sourced[Any]] = []
+        rejected: list[Sourced[Any]] = []
         for document in documents:
             result = extract_element(element, document, client=client)
-            if isinstance(result, Sourced):
-                facts[element.element_id] = result
-                break
+            if result.verified is not None:
+                verified.append(result.verified)
+            elif result.rejected is not None:
+                rejected.append(result.rejected)
+        facts[element.element_id] = ElementFindings(
+            verified=tuple(verified), rejected=tuple(rejected)
+        )
     return facts

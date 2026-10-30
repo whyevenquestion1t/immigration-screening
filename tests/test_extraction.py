@@ -11,7 +11,8 @@ from casesupport.criteria import Element
 from casesupport.guardrails import check_output_surface
 from casesupport.extraction import ElementReading, extract_element, extract_elements
 from casesupport.models import Document
-from casesupport.provenance import UNKNOWN, Sourced
+from casesupport.models import ElementFindings
+from casesupport.provenance import Sourced
 
 DOC = Document(
     document_id="i94",
@@ -65,8 +66,9 @@ def test_verified_reading_becomes_a_sourced_fact():
         )
     )
     result = extract_element(ELEMENT, DOC, client=client)
-    assert isinstance(result, Sourced)
-    assert result.verified and result.value == "2019-03-03" and result.page == 2
+    assert result.verified is not None and result.rejected is None
+    assert isinstance(result.verified, Sourced)
+    assert result.verified.value == "2019-03-03" and result.verified.page == 2
 
 
 def test_fabricated_quote_is_discarded():
@@ -80,7 +82,10 @@ def test_fabricated_quote_is_discarded():
             )
         )
     )
-    assert extract_element(ELEMENT, DOC, client=client) is UNKNOWN
+    result = extract_element(ELEMENT, DOC, client=client)
+    assert result.verified is None
+    # Retained as a rejected reading so the worksheet can disclose the attempt.
+    assert result.rejected is not None and result.rejected.value == "2017-01-01"
 
 
 def test_real_quote_cited_to_the_wrong_page_is_discarded():
@@ -93,7 +98,8 @@ def test_real_quote_cited_to_the_wrong_page_is_discarded():
             )
         )
     )
-    assert extract_element(ELEMENT, DOC, client=client) is UNKNOWN
+    result = extract_element(ELEMENT, DOC, client=client)
+    assert result.verified is None and result.rejected is not None
 
 
 def test_nonexistent_page_is_discarded():
@@ -104,23 +110,75 @@ def test_nonexistent_page_is_discarded():
             )
         )
     )
-    assert extract_element(ELEMENT, DOC, client=client) is UNKNOWN
+    result = extract_element(ELEMENT, DOC, client=client)
+    assert result.verified is None and result.rejected is not None
 
 
-def test_not_found_stays_unknown():
+def test_not_found_yields_nothing_at_all():
     client = FakeClient(FakeResponse(ElementReading(found=False)))
-    assert extract_element(ELEMENT, DOC, client=client) is UNKNOWN
+    result = extract_element(ELEMENT, DOC, client=client)
+    assert result.verified is None and result.rejected is None and not result.refused
 
 
 def test_refusal_is_handled_not_crashed():
     client = FakeClient(FakeResponse(parsed_output=None, stop_reason="refusal"))
-    assert extract_element(ELEMENT, DOC, client=client) is UNKNOWN
+    result = extract_element(ELEMENT, DOC, client=client)
+    assert result.refused is True and result.verified is None
 
 
 def test_elements_never_silently_omitted():
     client = FakeClient(FakeResponse(ElementReading(found=False)))
     facts = extract_elements([ELEMENT], [DOC], client=client)
-    assert facts == {"date_of_entry": UNKNOWN}
+    assert facts == {"date_of_entry": ElementFindings()}
+    assert not facts["date_of_entry"].addressed
+
+
+OTHER_DOC = Document(
+    document_id="lease",
+    title="Residential lease",
+    pages=("Tenant took occupancy on 1 January 2017.",),
+)
+
+
+def test_every_document_is_read_so_conflicts_survive():
+    # Both documents answer the element, and they disagree. First-hit-wins
+    # would hide that; the officer needs to see it.
+    client = FakeClient(
+        FakeResponse(
+            ElementReading(
+                found=True, value="2019-03-03", quote="Date of admission: 3 March 2019", page=2
+            )
+        ),
+        FakeResponse(
+            ElementReading(
+                found=True,
+                value="2017-01-01",
+                quote="Tenant took occupancy on 1 January 2017",
+                page=1,
+            )
+        ),
+    )
+    facts = extract_elements([ELEMENT], [DOC, OTHER_DOC], client=client)
+    findings = facts["date_of_entry"]
+
+    assert len(findings.verified) == 2
+    assert findings.conflicting is True
+    assert findings.distinct_values() == ["2017-01-01", "2019-03-03"]
+
+
+def test_rejected_readings_are_collected_across_documents():
+    client = FakeClient(
+        FakeResponse(
+            ElementReading(found=True, value="x", quote="a quote that is not present", page=2)
+        ),
+        FakeResponse(
+            ElementReading(found=True, value="y", quote="also not in this document", page=1)
+        ),
+    )
+    findings = extract_elements([ELEMENT], [DOC, OTHER_DOC], client=client)["date_of_entry"]
+    assert findings.verified == ()
+    assert len(findings.rejected) == 2
+    assert not findings.addressed
 
 
 def test_schema_offers_no_field_for_a_judgment_about_the_person():

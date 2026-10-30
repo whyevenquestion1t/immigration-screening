@@ -6,6 +6,10 @@ Builds, for one case and one reviewed criteria set:
     the document and page it came from, and the statutory citation the officer
     is working from;
   * which elements nothing in the record addresses;
+  * which elements the record states more than one value for, flagged as a
+    conflict for the officer to resolve rather than silently reduced to one;
+  * which readings were discarded for failing quote verification, so a missing
+    element and a rejected extraction do not look alike;
   * which submitted documents are not yet linked to any element, so a relevant
     exhibit cannot be quietly lost.
 
@@ -21,8 +25,8 @@ from typing import Any
 
 from casesupport.criteria import CriteriaSet, Element
 from casesupport.guardrails import check_output_surface
-from casesupport.models import CaseFile
-from casesupport.provenance import Sourced, Unknown
+from casesupport.models import CaseFile, ElementFindings
+from casesupport.provenance import Sourced
 
 
 @dataclass(frozen=True)
@@ -32,27 +36,53 @@ class ElementRow:
     element: Element
     facts: tuple[Sourced[Any], ...]
     addressed: bool
-    unverified_note: str | None = None
+    conflicting: bool = False
+    distinct_values: tuple[str, ...] = ()
+    discarded: tuple[Sourced[Any], ...] = ()
+
+    def _discarded_note(self) -> list[str]:
+        """Disclose readings that failed verification, without their values.
+
+        The officer is told an attempt was made and rejected, and where it
+        claimed to come from. The value itself is withheld: it did not survive
+        verification, so showing it would put an unsourced number in front of
+        the person deciding the case.
+        """
+        if not self.discarded:
+            return []
+        where = ", ".join(sorted({d.document_id for d in self.discarded}))
+        return [
+            f"    [{len(self.discarded)} reading(s) discarded: a value was extracted "
+            f"from {where} but its",
+            "     quote could not be verified against the source. Value withheld; "
+            "read the document.]",
+        ]
 
     def render(self) -> str:
-        head = f"[{self.element.element_id}] {self.element.description}"
-        cite = f"    criteria: {self.element.citation} <{self.element.source_url}>"
+        lines = [
+            f"[{self.element.element_id}] {self.element.description}",
+            f"    criteria: {self.element.citation} <{self.element.source_url}>",
+        ]
+        if self.conflicting:
+            lines.append(
+                "    *** CONFLICT: the record states "
+                f"{len(self.distinct_values)} different values for this element. "
+                "Officer must resolve. ***"
+            )
         if not self.addressed:
             hint = (
                 f" Expected evidence: {self.element.evidence_hint}"
                 if self.element.evidence_hint
                 else ""
             )
-            body = f"    NOT ADDRESSED by the submitted record.{hint}"
-            if self.unverified_note:
-                body += f"\n    note: {self.unverified_note}"
+            lines.append(f"    NOT ADDRESSED by the submitted record.{hint}")
         else:
-            body = "\n".join(
-                f"    {fact.value}  <- {fact.citation()}"
-                + (f"\n        note: {fact.note}" if fact.note else "")
-                for fact in self.facts
-            )
-        return "\n".join([head, cite, body])
+            for fact in self.facts:
+                lines.append(f"    {fact.value}  <- {fact.citation()}")
+                if fact.note:
+                    lines.append(f"        note: {fact.note}")
+        lines.extend(self._discarded_note())
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -61,6 +91,7 @@ class Worksheet:
     benefit_type: str
     rows: tuple[ElementRow, ...]
     unaddressed_elements: tuple[str, ...]
+    conflicting_elements: tuple[str, ...]
     unlinked_documents: tuple[str, ...]
     criteria_reviewed: bool
 
@@ -78,6 +109,12 @@ class Worksheet:
             )
         parts = ["\n".join(banner), ""]
         parts.extend(row.render() for row in self.rows)
+        if self.conflicting_elements:
+            parts.append(
+                "\nElements the record states more than one value for -- resolve\n"
+                "before relying on any of them:\n"
+                + "\n".join(f"  - {e}" for e in self.conflicting_elements)
+            )
         if self.unaddressed_elements:
             parts.append(
                 "\nElements no submitted document addresses:\n"
@@ -99,33 +136,32 @@ def build_worksheet(case: CaseFile, criteria: CriteriaSet) -> Worksheet:
     linked_documents: set[str] = set()
     rows: list[ElementRow] = []
     unaddressed: list[str] = []
+    conflicting: list[str] = []
 
     for element in criteria.elements:
-        fact = case.facts.get(element.element_id)
-        verified: tuple[Sourced[Any], ...] = ()
-        note = None
+        findings = case.facts.get(element.element_id) or ElementFindings()
 
-        if isinstance(fact, Sourced):
-            if fact.verified:
-                verified = (fact,)
-                linked_documents.add(fact.document_id)
-            else:
-                # An unverified extraction is not evidence. Surface that a
-                # value was proposed and rejected, rather than hiding it.
-                note = (
-                    f"an extracted value for this element could not be verified "
-                    f"against {fact.document_id} and was discarded"
-                )
+        # Only verified readings are evidence. A document a rejected reading
+        # claimed to come from still counts as linked -- the officer was sent
+        # there, so it is not an unreviewed exhibit.
+        for fact in findings.verified:
+            linked_documents.add(fact.document_id)
+        for discarded in findings.rejected:
+            linked_documents.add(discarded.document_id)
 
-        addressed = bool(verified)
-        if not addressed:
+        if not findings.addressed:
             unaddressed.append(element.element_id)
+        if findings.conflicting:
+            conflicting.append(element.element_id)
+
         rows.append(
             ElementRow(
                 element=element,
-                facts=verified,
-                addressed=addressed,
-                unverified_note=note,
+                facts=findings.verified,
+                addressed=findings.addressed,
+                conflicting=findings.conflicting,
+                distinct_values=tuple(findings.distinct_values()),
+                discarded=findings.rejected,
             )
         )
 
@@ -137,6 +173,7 @@ def build_worksheet(case: CaseFile, criteria: CriteriaSet) -> Worksheet:
         benefit_type=criteria.benefit_type,
         rows=tuple(rows),
         unaddressed_elements=tuple(unaddressed),
+        conflicting_elements=tuple(conflicting),
         unlinked_documents=unlinked,
         criteria_reviewed=criteria.reviewed,
     )

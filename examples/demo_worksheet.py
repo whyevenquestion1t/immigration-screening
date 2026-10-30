@@ -3,9 +3,9 @@
     python examples/demo_worksheet.py
 
 Uses a fake extraction client so the full path -- documents in, model reading,
-quote verification, worksheet out -- is visible and inspectable. One of the two
-model readings below cites a quote that is not in the document; watch what
-happens to it.
+quote verification, worksheet out -- is visible and inspectable. The scripted
+readings cover the three cases that matter: one verifies, one cites a quote
+that is not in the document, and two disagree with each other.
 """
 
 from dataclasses import dataclass
@@ -28,7 +28,7 @@ I94 = Document(
 RECEIPT = Document(
     document_id="receipt-notice",
     title="Receipt notice",
-    pages=("Receipt notice. We received your application.",),
+    pages=("Receipt notice. We received your application on 1 August 2019.",),
 )
 LEASE = Document(
     document_id="lease",
@@ -64,8 +64,10 @@ class FakeClient:
 def main() -> None:
     criteria = load_criteria(Path(__file__).parent.parent / "tests" / "fixtures" / "reviewed.yaml")
 
+    # Every element is read from every document, so the scripted responses are
+    # in (element, document) order: date_of_entry x 3, then filing_date x 3.
     client = FakeClient(
-        # date_of_entry, read from the I-94: quote is real and on page 2.
+        # date_of_entry from the I-94: quote is real and on page 2.
         FakeResponse(
             ElementReading(
                 found=True,
@@ -75,8 +77,23 @@ def main() -> None:
                 reasoning="Stated in the admission field of the arrival record.",
             )
         ),
-        # filing_date: the receipt notice does not actually state a date, and
-        # this reading invents one with a quote that is not in the document.
+        # date_of_entry from the receipt notice: not stated there.
+        FakeResponse(ElementReading(found=False)),
+        # date_of_entry from the lease: a different date, and the quote checks
+        # out. Two documents now disagree -- the officer must see both.
+        FakeResponse(
+            ElementReading(
+                found=True,
+                value="2019-06-01",
+                quote="Lease term 1 June 2019 through 31 May 2024",
+                page=1,
+                reasoning="Lease start date.",
+            )
+        ),
+        # filing_date from the I-94: not stated.
+        FakeResponse(ElementReading(found=False)),
+        # filing_date from the receipt notice: right answer, but the quote is
+        # paraphrased rather than copied -- so it fails verification.
         FakeResponse(
             ElementReading(
                 found=True,
@@ -86,6 +103,8 @@ def main() -> None:
                 reasoning="Receipt notice.",
             )
         ),
+        # filing_date from the lease: not stated.
+        FakeResponse(ElementReading(found=False)),
     )
 
     documents = [I94, RECEIPT, LEASE]
@@ -94,11 +113,15 @@ def main() -> None:
 
     print(build_worksheet(case, criteria).render())
     print("\n" + "-" * 70)
-    print("Elements the record did not answer:", case.unknown_facts())
+    print("Elements the record did not answer:  ", case.unknown_facts())
+    print("Elements with conflicting evidence:  ", case.conflicting_facts())
     print(
-        "The filing_date reading above was discarded: its quote does not appear\n"
-        "in the receipt notice. The officer is told the element is unaddressed\n"
-        "rather than shown a date the document never stated."
+        "\ndate_of_entry: two documents verify different dates. Both are shown\n"
+        "with their own citation and the element is flagged CONFLICT. The\n"
+        "software does not pick one.\n\n"
+        "filing_date: the reading was right about the date but paraphrased the\n"
+        "quote, so verification failed. The officer is told a reading was\n"
+        "discarded and sent to the document -- not shown the unsourced value."
     )
 
 
